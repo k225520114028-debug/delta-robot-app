@@ -2,30 +2,83 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 import joblib
+import json
 import pandas as pd
-import io
+import os
 
-# Cấu hình trang hiển thị di động
+# Cấu hình giao diện di động
 st.set_page_config(page_title="Delta Robot AI Agent", layout="wide", initial_sidebar_state="collapsed")
+
+# Cache mô hình AI vào bộ nhớ đệm để chạy cực nhanh trên điện thoại
+@st.cache_resource
+def load_model_from_file(file_path):
+    try:
+        return joblib.load(file_path)
+    except Exception as e:
+        return None
+
+@st.cache_data
+def load_json_config(file_path):
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+# Tự động tìm kiếm các file .joblib và .json trong thư mục ứng dụng
+all_files = os.listdir('.')
+joblib_files = [f for f in all_files if f.endswith('.joblib')]
+json_files = [f for f in all_files if f.endswith('.json') and f != 'package.json']
+
+# Phân loại mô hình Thuận và Ngược dựa trên tên file
+fk_model_path = None
+ik_model_path = None
+
+for f in joblib_files:
+    f_lower = f.lower()
+    if 'thuan' in f_lower or 'fk' in f_lower or 'forward' in f_lower:
+        fk_model_path = f
+    elif 'nguoc' in f_lower or 'ik' in f_lower or 'inverse' in f_lower:
+        ik_model_path = f
+
+# Nếu không phân loại được theo tên, tự động gán file đầu tiên tìm thấy
+if not fk_model_path and len(joblib_files) > 0:
+    fk_model_path = joblib_files[0]
+if not ik_model_path and len(joblib_files) > 1:
+    ik_model_path = joblib_files[1]
 
 st.title("🤖 AI Agent - Động học Robot Delta (3RUU)")
 
-# Mở 2 Tab chức năng cho bài toán Thuận và Ngược
 tab1, tab2 = st.tabs(["🔄 Bài toán Động học Thuận", "↩️ Bài toán Động học Ngược"])
 
 # --- TAB 1: BÀI TOÁN THUẬN ---
 with tab1:
     st.header("1. Cấu hình & Thông số hình học")
     
-    col_model, col_geo = st.columns(2)
-    with col_model:
-        uploaded_fk_joblib = st.file_uploader("Nạp Mô hình Thuận (.joblib)", type=["joblib"], key="fk_joblib")
-    with col_geo:
-        col_r1, col_r2 = st.columns(2)
-        R = col_r1.number_input("R (mm)", value=100.0, step=1.0)
-        r = col_r2.number_input("r (mm)", value=50.0, step=1.0)
-        a = col_r1.number_input("a (mm)", value=250.0, step=1.0)
-        b = col_r2.number_input("b (mm)", value=440.0, step=1.0)
+    model_fk = None
+    if fk_model_path:
+        model_fk = load_model_from_file(fk_model_path)
+        if model_fk is not None:
+            st.success(f"✅ Đã đóng gói sẵn Mô hình Thuận: `{fk_model_path}`")
+    
+    if model_fk is None:
+        st.warning("⚠️ Chưa tìm thấy file `.joblib` trong ứng dụng. Bạn có thể nạp thủ công:")
+        uploaded_fk = st.file_uploader("Nạp Mô hình Thuận (.joblib)", type=["joblib"], key="fk_upload")
+        if uploaded_fk:
+            model_fk = joblib.load(uploaded_fk)
+
+    # Hiển thị thông số từ file JSON nếu có
+    if json_files:
+        config_data = load_json_config(json_files[0])
+        if config_data:
+            with st.expander(f"📄 Xem cấu hình từ file JSON tích hợp ({json_files[0]})"):
+                st.json(config_data)
+
+    col_r1, col_r2, col_a, col_b = st.columns(4)
+    R = col_r1.number_input("R (mm)", value=100.0, step=1.0)
+    r = col_r2.number_input("r (mm)", value=50.0, step=1.0)
+    a = col_a.number_input("a (mm)", value=250.0, step=1.0)
+    b = col_b.number_input("b (mm)", value=440.0, step=1.0)
 
     st.subheader("2. Phạm vi góc khớp q11..q33 (Độ)")
     q_ranges = {}
@@ -35,7 +88,6 @@ with tab1:
         ("q31", -45.0, 90.0), ("q32", -30.0, 30.0), ("q33", 150.0, 210.0)
     ]
     
-    # Tạo lưới nhập dải góc khớp 3x3
     cols = st.columns(3)
     for idx, (name, d_min, d_max) in enumerate(default_ranges):
         with cols[idx % 3]:
@@ -50,15 +102,13 @@ with tab1:
     if st.button("🚀 Chạy Bài toán Thuận & Vẽ Pointcloud 3D", use_container_width=True):
         st.info("Đang tính toán vùng làm việc...")
         
-        # Sinh mẫu ngẫu nhiên dạng Radian
         q_samples = {}
         for name, (q_min, q_max) in q_ranges.items():
             q_samples[name] = np.random.uniform(np.radians(q_min), np.radians(q_max), n_samples)
 
         points_xyz = []
-        if uploaded_fk_joblib is not None:
+        if model_fk is not None:
             try:
-                model = joblib.load(uploaded_fk_joblib)
                 X_in = np.column_stack([
                     np.full(n_samples, R), np.full(n_samples, r),
                     np.full(n_samples, a), np.full(n_samples, b),
@@ -66,10 +116,10 @@ with tab1:
                     q_samples["q21"], q_samples["q22"], q_samples["q23"],
                     q_samples["q31"], q_samples["q32"], q_samples["q33"]
                 ])
-                points_xyz = model.predict(X_in)
-                st.success("Dự đoán tọa độ bằng AI thành công!")
+                points_xyz = model_fk.predict(X_in)
+                st.success("Dự đoán tọa độ bằng AI Agent tích hợp thành công!")
             except Exception as e:
-                st.warning(f"Không thể chạy Joblib: {e}. Tự động tính bằng công thức hình học.")
+                st.warning(f"Lỗi khi chạy mô hình AI: {e}. Tự động chuyển sang tính toán hình học.")
                 points_xyz = np.array([
                     [(R - r) + a * np.cos(q_samples["q11"][i]) + b * np.cos(q_samples["q13"][i]) * np.cos(q_samples["q12"][i]),
                      b * np.sin(q_samples["q13"][i]) * np.cos(q_samples["q12"][i]),
@@ -84,12 +134,12 @@ with tab1:
                 for i in range(n_samples)
             ])
 
-        # Xuất file CSV cho người dùng tải về điện thoại
+        # Tải file CSV
         df_out = pd.DataFrame(points_xyz, columns=["Px", "Py", "Pz"])
         csv_bytes = df_out.to_csv(index=False).encode('utf-8')
         st.download_button("📥 Tải file CSV kết quả P(x,y,z)", csv_bytes, "delta_workspace.csv", "text/csv")
 
-        # Biểu diễn đồ thị 3D PointCloud (Xoay/Zoom bằng tay mượt mà trên điện thoại)
+        # Đồ thị 3D xoay/zoom cảm ứng
         fig = go.Figure(data=[go.Scatter3d(
             x=points_xyz[:, 0], y=points_xyz[:, 1], z=points_xyz[:, 2],
             mode='markers',
@@ -103,7 +153,18 @@ with tab1:
 # --- TAB 2: BÀI TOÁN NGƯỢC ---
 with tab2:
     st.header("Tính toán 9 góc khớp từ tọa độ P(x, y, z)")
-    uploaded_ik_joblib = st.file_uploader("Nạp Mô hình Ngược (.joblib)", type=["joblib"], key="ik_joblib")
+    
+    model_ik = None
+    if ik_model_path:
+        model_ik = load_model_from_file(ik_model_path)
+        if model_ik is not None:
+            st.success(f"✅ Đã đóng gói sẵn Mô hình Ngược: `{ik_model_path}`")
+
+    if model_ik is None:
+        st.warning("⚠️ Chưa tìm thấy file `.joblib` cho bài toán ngược. Bạn có thể nạp thủ công:")
+        uploaded_ik = st.file_uploader("Nạp Mô hình Ngược (.joblib)", type=["joblib"], key="ik_upload")
+        if uploaded_ik:
+            model_ik = joblib.load(uploaded_ik)
     
     col_p1, col_p2, col_p3 = st.columns(3)
     px = col_p1.number_input("Px (mm)", value=0.0, format="%.4f")
@@ -111,9 +172,8 @@ with tab2:
     pz = col_p3.number_input("Pz (mm)", value=350.0, format="%.4f")
 
     if st.button("🎯 Tính toán Động học Ngược", use_container_width=True):
-        if uploaded_ik_joblib is not None:
+        if model_ik is not None:
             try:
-                model_ik = joblib.load(uploaded_ik_joblib)
                 X_ik = np.array([[R, r, a, b, px, py, pz]])
                 q_pred = model_ik.predict(X_ik)[0]
                 
@@ -126,4 +186,4 @@ with tab2:
             except Exception as e:
                 st.error(f"Lỗi tính toán IK: {e}")
         else:
-            st.info("Vui lòng nạp file `.joblib` bài toán ngược để dự đoán.")
+            st.error("Chưa có mô hình AI bài toán ngược để tính toán!")
