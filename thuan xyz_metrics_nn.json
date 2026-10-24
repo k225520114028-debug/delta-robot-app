@@ -1,0 +1,34 @@
+{
+    "file_source": "D:/Hậu delta/gộp các vùng lv.xlsx",
+    "algorithm": "MLPRegressor_(128, 128, 64)",
+    "polynomial_degree": 2,
+    "data_split": {
+        "train_ratio": 0.7,
+        "test_ratio": 0.3,
+        "total_samples": 24456,
+        "train_samples": 17119,
+        "test_samples": 7337
+    },
+    "overall_train_metrics": {
+        "R2_score_average": 0.99954,
+        "RMSE_average": 4.35796
+    },
+    "overall_test_metrics": {
+        "R2_score_average": 0.99949,
+        "RMSE_average": 4.64032
+    },
+    "per_column_test_metrics": {
+        "x": {
+            "R2_score": 0.99943,
+            "RMSE": 4.34581
+        },
+        "y": {
+            "R2_score": 0.99943,
+            "RMSE": 5.15586
+        },
+        "z": {
+            "R2_score": 0.9996,
+            "RMSE": 4.37363
+        }
+    }
+}
